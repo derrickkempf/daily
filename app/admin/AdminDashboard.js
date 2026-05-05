@@ -6,17 +6,29 @@ export default function AdminDashboard({ successProvider, errorMessage }) {
   const router = useRouter()
   const [providers, setProviders] = useState([])
   const [loading, setLoading]     = useState(true)
+  const [jobs, setJobs]           = useState([])
 
   const refresh = async () => {
-    const r = await fetch('/api/social/status', { cache: 'no-store' })
-    if (r.ok) {
-      const j = await r.json()
-      setProviders(j.providers || [])
-    }
+    const [s, l] = await Promise.all([
+      fetch('/api/social/status',         { cache: 'no-store' }),
+      fetch('/api/admin/crosspost-log',   { cache: 'no-store' }),
+    ])
+    if (s.ok) setProviders((await s.json()).providers || [])
+    if (l.ok) setJobs((await l.json()).jobs || [])
     setLoading(false)
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    // Auto-refresh log every 5 seconds (cheap query, helps testing feel live)
+    const t = setInterval(() => {
+      fetch('/api/admin/crosspost-log', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { if (j) setJobs(j.jobs || []) })
+        .catch(() => {})
+    }, 5000)
+    return () => clearInterval(t)
+  }, [])
 
   const disconnect = async (id) => {
     await fetch(`/api/social/status?provider=${id}`, { method: 'DELETE' })
@@ -119,6 +131,58 @@ export default function AdminDashboard({ successProvider, errorMessage }) {
         <p style={{ color: 'var(--color-text-secondary)' }}>
           Use the composer at the top of the <a href="/" style={{ borderBottom: '1px solid var(--color-border-strong)' }}>Timeline</a> to publish.
         </p>
+      </section>
+
+      <section style={{ marginBottom: 'var(--space-12)' }}>
+        <h2 style={{
+          fontSize: 'var(--text-xl)', fontWeight: 500,
+          letterSpacing: 'var(--tracking-tight)',
+          margin: '0 0 var(--space-3)',
+        }}>Cross-post log</h2>
+        <p style={{ color: 'var(--color-text-secondary)', marginBottom: 'var(--space-4)' }}>
+          Last 30 cross-post attempts. Auto-refreshes every 5 seconds.
+        </p>
+        {jobs.length === 0 ? (
+          <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
+            No cross-post attempts yet.
+          </p>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+            <thead>
+              <tr>
+                <th style={cellHead}>When</th>
+                <th style={cellHead}>Provider</th>
+                <th style={cellHead}>Status</th>
+                <th style={cellHead}>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map(j => (
+                <tr key={j.id}>
+                  <td style={cell}>{new Date(j.created_at).toLocaleString()}</td>
+                  <td style={cell}><strong>{j.provider}</strong></td>
+                  <td style={cell}>
+                    <span className="tag" style={{
+                      borderColor:
+                        j.status === 'sent'    ? 'var(--color-success)' :
+                        j.status === 'failed'  ? 'var(--color-destructive)' :
+                        j.status === 'skipped' ? 'var(--color-warning)' :
+                        'var(--color-border)',
+                    }}>{j.status}</span>
+                  </td>
+                  <td style={{ ...cell, color: 'var(--color-text-secondary)' }}>
+                    {j.external_url
+                      ? <a href={j.external_url} target="_blank" rel="noopener noreferrer"
+                           style={{ borderBottom: '1px solid var(--color-border-strong)' }}>view →</a>
+                      : j.error
+                        ? <span title={j.error} style={{ color: 'var(--color-destructive)' }}>{(j.error || '').slice(0, 80)}</span>
+                        : <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       <section>
